@@ -1,0 +1,357 @@
+---
+title: "**Climate Change - Greenhouse Gases Effects**"
+subtitle: "Project submission for edX *Data Science: Capstone* course"
+author: "Justyna Piątyszek"
+date: "`r format(Sys.Date())`"
+output: 
+  pdf_document:
+     toc: true
+     toc_depth: 4
+     df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Introduction 
+
+This is the final project submission for HarvardX Professional Certificate in Data Science program.
+
+The aim of this project is to analyze the influence of several greenhouse gases on the changes in average global temperature and to build a model that accurately predicts the temperature changes based on the observed gas concentrations.
+
+We will use a data set based on data coming from NOAA Earth System Research Laboratory (ESRL), SOLARIS-HEPPA, NASA GISS and the Climatic Research Unit of the University of East Anglia.
+
+The data set can be found on Kaggle under the following link:\
+*<https://www.kaggle.com/datasets/econdata/climate-change>*
+\
+
+We will start the analysis with Exploratory Data Analysis (EDA). Based on noticed data properties, we will try out several models including Linear Regression, Random Forest, K-Nearest Neighbors and Ensemble model. Before training the models and making predictions, we will partition the data set into train and test sets. To evaluate our models, we will compare R-squared, Root Mean Squared Error and Mean Absolute Error.
+
+We start by loading the needed libraries (please note that this process could take a couple of minutes):
+
+```{r loading-libs, message=FALSE, warning=FALSE}
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(corrplot)) install.packages("corrplot", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(dlookr)) install.packages("dlookr", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+
+library(caret)
+library(corrplot)
+library(data.table)
+library(dlookr)
+library(dplyr)
+library(randomForest)
+library(tidyverse)
+```
+
+Loading the .csv file into R:
+
+```{r loading-file, message=FALSE, warning=FALSE}
+url <- "https://raw.githubusercontent.com/justpiat/Climate_Change/bd216a156291c993fc4f7145eba9979b416d4b1f/climate_change.csv"
+dat <- read.csv(url)
+names(dat)[7] <- 'CFC-11'
+names(dat)[8] <- 'CFC-12'
+```
+
+## Exploratory Data Analysis
+
+We can see that our data set is a tidy data frame with 308 rows and 11 columns. Each line represents measured global values on a given month between May 1983 and December 2008.
+
+```{r properties-dat, include=FALSE}
+class(dat)
+dim(dat)
+```
+
+```{r properties2-dat, fig.align='center'}
+head(dat)
+```
+\
+
+The variables include:
+
+- `Year` - the year of the observation
+- `Month` - the month of the observation
+- `MEI` - multivariate ENSO index, characterizing the intensity of El Niño Southern Oscillation (an irregular weather event in the Pacific Ocean that affects global temperatures)
+- `CO2` - atmospheric concentrations of carbon dioxide
+- `CH4` - atmospheric concentrations of methane
+- `N2O` - atmospheric concentrations of nitrous oxide
+- `CFC-11` - atmospheric concentrations of trichlorofluoromethane (CCI3F), commonly referred to as CFC-11 or Freon-11
+- `CFC-12` - atmospheric concentrations of dichlorodifluoromethane (CCI2F2), commonly referred to as CFC-12 or Freon-12
+- `TSI` - Total Solar Irradiance in W/m2 (the solar power over all wavelengths per unit area)
+- `Aerosols` - mean stratospheric aerosol optical depth at 550 nm (indication of how much direct sunlight is prevented from reaching the ground by various particles, e.g. from a volcanic eruption)
+- `Temp` - the difference in degrees Celsius between the average global temperature in the given month and a reference value
+
+CO2, CH4 and N20 concentrations are expressed in ppmv (parts per million by volume), whereas CFC-11 and CFC-12 in ppbv (parts per billion by volume).
+
+Using dlookr package, we can see that all variables are numeric and that the data set has mostly unique values (except for `Year` and `Month`). We can see that there are no missing values for any of the variables:
+
+```{r diagnose-dat, fig.align='center'}
+diagnose(dat)
+```
+\
+
+The following tibble gives us basic statistics of the variables:
+
+```{r describe-dat, fig.align='center'}
+describe(dat, MEI:Temp) %>% select(variable, mean:kurtosis)
+```
+\
+\
+
+The following graph presents the temperature change over time:
+
+```{r trend-temp, echo=FALSE, message=FALSE, fig.width=5, fig.height=3.5, fig.align='center'}
+dat %>% ggplot(aes(Year, Temp)) + geom_point() + geom_smooth(method="loess", colour="darkgrey") + 
+  geom_hline(yintercept = 0, colour = "darkgreen") + scale_x_continuous(n.breaks = 8)
+```
+
+
+The last negative value of the global temperature change was observed in 1994, with the highest increases from 1997 onward.
+The temperature values show a clear positive trend for most of the analyzed period with a slight downward trend starting in 2005.\
+
+
+From the graphs below, we can see that the yearly average concentrations of CH4, CO2 and NO3 follow a very similar pattern, with visibly increased emissions at the beginning of the 21st century. CFC-11 and CFC-12 concentrations seem to notice a slight decline at the end of the analyzed period. Aerosols levels seem to be mostly constant with a concentration spike in the 1990s.
+
+```{r trend-gases, echo=FALSE, message=FALSE, fig.align='center'}
+dat_long <- pivot_longer(dat, cols=c(CO2:'CFC-12', Aerosols), names_to = "Variable", values_to = "Value")
+dat_long %>% group_by(Year, Variable) %>% summarise(Year = Year, Variable = Variable, Average = mean(Value)) %>% 
+  ggplot(aes(Year, Average)) + 
+  geom_line() + 
+  facet_wrap(~ Variable, scales = "free_y", ncol = 1) + scale_x_continuous(n.breaks = 8)
+```
+
+
+\
+The correlation matrix shows that Year, CH4, CO2, NO3 and CFC-12 have a high positive correlation with one another and with the temperature change. The `Aerosols` variable shows a negative correlation to other gases concentrations and temperature. `TSI` and `Month` show no significant correlation with any of the variables and `MEI` has a slight positive correlation with Aerosols levels.
+
+```{r heatmap-corr, echo=FALSE, fig.width=4, fig.height=4, fig.align='center'}
+corrplot(cor(dat), method="color", bg="black", tl.col="black")
+```
+\
+
+CH4, CO2 and N2O concentrations may prove to be the strongest predictors of the change in temperature. We can see that the standardized values of those gases align with the z-scores for temperature values:
+
+```{r var-scaled, echo=FALSE, fig.width=5, fig.height=3.5, fig.align='center'}
+dat_scaled <- data.frame(scale(dat[3:11], center = TRUE, scale = TRUE))
+dat_scaled_long <- pivot_longer(dat_scaled, cols=c(CO2:N2O), names_to = "Variable", values_to = "Value")
+dat_scaled_long %>% group_by(Variable) %>% ggplot(aes(Value, Temp, color=Variable)) + geom_point() +
+  scale_color_manual(values = c(CH4 = "grey40", CO2 = "blue", N2O = "red2")) 
+```
+\
+
+## Methodology - Prediction models
+
+To train our models, we will divide the data set into train and test sets:
+```{r partition-dat, warning=FALSE}
+set.seed(1, sample.kind = "Rounding")
+test_index <- createDataPartition(y = dat$Temp, times = 1, p = 0.2, list = FALSE)
+train_set <- dat[-test_index,]
+test_set <- dat[test_index,]
+
+train_x <- train_set[1:10]
+train_y <- train_set$Temp
+
+test_x <- test_set[1:10]
+test_y <- test_set$Temp
+```
+
+
+To evaluate our models, we will create functions calculating R-squared (`R2`), Root Mean Squared Error (`RMSE`) and Mean Absolute Error (`MAE`):
+```{r r2-rmse-mae}
+R2 <- function(test_y, y_hat){
+  sqrt(cor(test_y, y_hat))
+}
+
+RMSE <- function(test_y, y_hat){
+  sqrt(mean((y_hat - test_y)^2))
+}
+
+MAE <- function(test_y, y_hat){
+  mean(abs(test_y - y_hat))
+}
+```
+\
+
+### Linear Regression
+
+First, we will make predictions using the variables that seem to have the biggest influence on the temperature according to the correlation matrix, i.e. Year, CH4, CO2, N2O, CFC-12 and Aerosols:
+
+```{r lm1, warning=FALSE}
+train_x <- train_set[c(1,4:6,8,10)]
+test_x <- test_set[c(1,4:6,8,10)]
+
+set.seed(1, sample.kind = "Rounding") 
+fit_lm1 <- train(train_x, train_y, method = "lm")
+y_hat_lm1 <- predict(fit_lm1, newdata = test_x)
+R2_lm1 <- R2(test_y, y_hat_lm1)
+RMSE_lm1 <- RMSE(test_y, y_hat_lm1)
+MAE_lm1 <- MAE(test_y, y_hat_lm1)
+print(R2_lm1)
+print(RMSE_lm1)
+print(MAE_lm1)
+```
+
+In the second model, we will train our linear regression model using all variables to predict temperature change:
+
+```{r lm2, warning=FALSE, message=FALSE}
+train_x <- train_set[1:10]
+test_x <- test_set[1:10]
+
+set.seed(1, sample.kind = "Rounding") 
+fit_lm2 <- train(train_x, train_y, method = "lm")
+y_hat_lm2 <- predict(fit_lm2, newdata = test_x)
+R2_lm2 <- R2(test_y, y_hat_lm2)
+RMSE_lm2 <- RMSE(test_y, y_hat_lm2)
+MAE_lm2 <- MAE(test_y, y_hat_lm2)
+print(R2_lm2)
+print(RMSE_lm2)
+print(MAE_lm2)
+```
+
+We can see that the linear model with all 10 predictors gives us slightly better predictions:
+
+```{r lm2-plot, message=FALSE, warning=FALSE, echo=FALSE, fig.show="hold", out.width="50%"}
+plot(test_y,y_hat_lm2,
+     pch=19,xlab="Observed Values",
+     ylab="Predictions") + 
+  mtext(paste("R-squared",
+            format(R2_lm2,digits=3)))
+
+plot(test_y,(y_hat_lm2-test_y),
+     pch=18,ylab="Residuals",
+     xlab="Observed Values",col="lightblue") + 
+  abline(h=0,col="red",lty=2)
+```
+\
+
+### Random Forest
+
+We will use all 10 predictors and the `randomForest` function in the randomForest package for our next model:
+
+```{r rename-rf, echo=FALSE}
+names(train_set)[c(7,8)] <- c('CFC11','CFC12')
+names(test_set)[c(7,8)] <- c('CFC11','CFC12')
+```
+
+```{r rf, warning=FALSE}
+set.seed(1, sample.kind = "Rounding")
+fit_rf <- randomForest(Temp~., data = train_set)
+```
+
+We can see that the model's accuracy stabilizes at around 50 trees:
+
+```{r accuracy-rf, echo=FALSE, fig.align='center', fig.height=4, fig.width=4}
+plot(fit_rf, col = "blue")
+```
+
+The red line shows us the resulting estimate for this random forest:
+
+```{r estimates-rf, echo=FALSE, fig.align='center', fig.height=4, fig.width=4}
+test_set %>%
+  mutate(y_hat_rf = predict(fit_rf, newdata = test_set)) %>% 
+  ggplot() +
+  geom_point(aes(Year, Temp)) +
+  geom_line(aes(Year, y_hat_rf), col="red2")
+```
+
+And we can see it gives us lower errors than the linear models:
+
+```{r errors-rf, echo=FALSE}
+y_hat_rf <- predict(fit_rf, newdata = test_set)
+R2_rf <- R2(test_y, y_hat_rf)
+RMSE_rf <- RMSE(test_y, y_hat_rf)
+MAE_rf <- MAE(test_y, y_hat_rf)
+print(R2_rf)
+print(RMSE_rf)
+print(MAE_rf)
+```
+
+The most important variables in this model for predicting temperature change are CFC-12, N2O and Year:
+
+```{r varImp-rf, fig.align='center'}
+varImp(fit_rf) %>% arrange(desc(.))
+```
+\
+
+### K-Nearest Neighbors
+
+For the kNN algorithm, we will check a sequence of k from 1 to 10, since we do not have many data points:
+
+```{r knn, warning=FALSE}
+set.seed(1, sample.kind = "Rounding")
+fit_knn <- train(Temp ~ ., method = "knn", 
+                   data = train_set,
+                 tuneGrid = data.frame(k = seq(1:10)))
+```
+
+We get the best estimates with the parameter k=2:
+
+```{r bestTune-knn, fig.width=5, fig.height=3.5, fig.align='center'}
+fit_knn$bestTune
+plot(fit_knn)
+```
+
+```{r pred-knn}
+y_hat_knn <- predict(fit_knn, test_set)
+```
+
+We can see that we get better results than from the linear models, but slightly worse than with the RF algorithm:
+
+```{r errors-knn}
+R2_knn <- R2(test_y, y_hat_knn)
+RMSE_knn <- RMSE(test_y, y_hat_knn)
+MAE_knn <- MAE(test_y, y_hat_knn)
+print(R2_knn)
+print(RMSE_knn)
+print(MAE_knn)
+```
+\
+
+### Ensemble
+
+For our final model, we will check if we can improve the final results by combining the results of the two previous algorithms.
+We will combine the random forest and knn models and create new predictions by taking the average of the two models:
+
+
+```{r ensemble}
+y_hat_ensemble <- (y_hat_rf + y_hat_knn)/2
+R2_en <- R2(test_y, y_hat_ensemble)
+RMSE_en <- RMSE(test_y, y_hat_ensemble)
+MAE_en <- MAE(test_y, y_hat_ensemble)
+print(R2_en)
+print(RMSE_en)
+print(MAE_en)
+```
+\
+
+## Results
+
+We will store all results in the following data frame:
+
+```{r results, echo=FALSE, warning=FALSE, message=FALSE, fig.align='center'}
+results <- data_frame(model = c("Linear I", "Linear II", 
+                                "Random Forest","K-Nearest Neighbors", "Ensemble"),
+                      R2 = c(R2_lm1, R2_lm2, R2_rf, R2_knn, R2_en),
+                      RMSE = c(RMSE_lm1, RMSE_lm2, RMSE_rf, RMSE_knn, RMSE_en),
+                      MAE = c(MAE_lm1, MAE_lm2, MAE_rf, MAE_knn, MAE_en))
+knitr::kable(results)
+```
+
+
+By trying out different models, we improved the R-squared from **0.908** to **0.964**, the RMSE from **0.0921** to **0.0612** and the Mean Absolute Error from **0.0718** to **0.0499**. We got the best predictions from the **Random Forest algorithm**.
+We can also see that combining predictions from the knn and the random forest models greatly improved the results compared to the knn model alone.
+
+
+## Conclusion
+
+Despite relatively few data points, the trained models turned out to provide satisfactory predictions of global temperature change.
+A similar analysis could be conducted with an updated data set including new observations after the year 2008 until now. To get a more detailed picture, we could also use emission values per country/region.\
+The caret package provides many more algorithms which could be used in future work to improve predictions.
+The models can be useful to predict the scale of global warming and to single out the factors that influence global temperature the most. This can provide insight into which gas concentrations should be reduced to most effectively slow down the rise in global temperature.
+
+
