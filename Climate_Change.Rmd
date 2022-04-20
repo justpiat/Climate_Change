@@ -333,7 +333,7 @@ print(MAE_en)
 
 We will store all results in the following data frame:
 
-```{r results, echo=FALSE, warning=FALSE, message=FALSE, fig.align='center'}
+```{r results, warning=FALSE, message=FALSE, fig.align='center'}
 results <- data_frame(model = c("Linear I", "Linear II", 
                                 "Random Forest","K-Nearest Neighbors", "Ensemble"),
                       R2 = c(R2_lm1, R2_lm2, R2_rf, R2_knn, R2_en),
